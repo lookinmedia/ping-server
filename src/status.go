@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"main/src/assets"
 	"net"
 	"strconv"
@@ -283,6 +282,8 @@ func FetchJavaStatus(host string, port uint16, opts *StatusOptions) JavaStatusRe
 
 	// Setup initial wait group deltas
 	{
+		wg.Add(2)
+
 		if opts.Query {
 			wg.Add(1)
 		}
@@ -314,54 +315,56 @@ func FetchJavaStatus(host string, port uint16, opts *StatusOptions) JavaStatusRe
 	defer legacyCancel()
 	defer queryCancel()
 
-	{
-		// Retrieve the pre-netty rewrite Java Edition status (Minecraft 1.7 and below)
-		legacyStatusResult, err = mcutil.StatusLegacy(legacyContext, host, port, options.JavaStatusLegacy{
-			EnableSRV:       true,
-			Timeout:         opts.Timeout - time.Millisecond*100,
-			ProtocolVersion: 47,
-		})
-		if err != nil {
-			log.Printf("legacyStatusResult err %s", err)
-			if opts.Query && queryResult == nil {
-				if queryResult == nil {
-					queryCancel()
-				}
-			}
-		} else {
-			statusCancel()
-		}
-	}
-
 	// Retrieve the post-netty rewrite Java Edition status (Minecraft 1.8+)
 	{
-		// если legacy Status вернул ошибку только в том случае, делвем опрос статуса новой версии
-		if err != nil {
-			statusResult, err = mcutil.Status(statusContext, host, port, options.JavaStatus{
+		go func() {
+			statusResult, _ = mcutil.Status(statusContext, host, port, options.JavaStatus{
 				EnableSRV:       true,
 				Timeout:         opts.Timeout - time.Millisecond*100,
 				ProtocolVersion: 47,
 				Ping:            false,
 			})
-			if err != nil {
-				log.Printf("statusResult err %s", err)
-				if opts.Query && queryResult == nil {
-					if queryResult == nil {
-						queryCancel()
-					}
+
+			wg.Done()
+
+			legacyCancel()
+
+			if opts.Query && queryResult == nil {
+				time.Sleep(time.Millisecond * 250)
+
+				if queryResult == nil {
+					queryCancel()
 				}
 			}
-		}
+		}()
 	}
+
+	// Retrieve the pre-netty rewrite Java Edition status (Minecraft 1.7 and below)
+	{
+		go func() {
+			legacyStatusResult, _ = mcutil.StatusLegacy(legacyContext, host, port, options.JavaStatusLegacy{
+				EnableSRV:       true,
+				Timeout:         opts.Timeout - time.Millisecond*100,
+				ProtocolVersion: 47,
+			})
+
+			wg.Done()
+
+			time.Sleep(time.Millisecond * 250)
+
+			if queryResult == nil {
+				queryCancel()
+			}
+		}()
+	}
+
 	// Retrieve the query information (if it is available)
 	if opts.Query {
 		go func() {
-			queryResult, err = mcutil.FullQuery(queryContext, host, port, options.Query{
+			queryResult, _ = mcutil.FullQuery(queryContext, host, port, options.Query{
 				Timeout: opts.Timeout - time.Millisecond*100,
 			})
-			if err != nil {
-				log.Printf("fullQuery err %s", err)
-			}
+
 			wg.Done()
 		}()
 	}
@@ -592,7 +595,7 @@ func BuildJavaResponse(host string, port uint16, status *response.JavaStatus, le
 			Port: srvRecord.Port,
 		}
 	}
-	log.Printf("result: %+v", result)
+
 	return
 }
 
