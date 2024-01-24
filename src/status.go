@@ -133,7 +133,6 @@ func GetJavaStatus(host string, port uint16, opts *StatusOptions) (*JavaStatusRe
 	if config.Cache.EnableLocks {
 		mutex := r.NewMutex(fmt.Sprintf("java-lock:%s", cacheKey))
 		mutex.Lock()
-
 		defer mutex.Unlock()
 	}
 
@@ -319,8 +318,16 @@ func FetchJavaStatus(host string, port uint16, opts *StatusOptions) JavaStatusRe
 
 	// Retrieve the post-netty rewrite Java Edition status (Minecraft 1.8+)
 	{
-		constraints, _ := version.NewConstraint(">= 1.8")
-		currVersion, _ := version.NewVersion(opts.SrvVersion)
+		constraints, err := version.NewConstraint(">= 1.8")
+		if err != nil {
+			log.Printf("constraints new failed %s", err)
+			return JavaStatusResponse{}
+		}
+		currVersion, err := version.NewVersion(opts.SrvVersion)
+		if err != nil {
+			log.Printf("curr version new failed %s", err)
+			return JavaStatusResponse{}
+		}
 
 		if opts.SrvVersion == "" {
 			currVersion, err = CreateWatcher().VersionByServer(host)
