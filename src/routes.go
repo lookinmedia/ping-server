@@ -39,7 +39,7 @@ func init() {
 	}
 
 	app.Get("/ping", PingHandler)
-	app.Get("/status/java/:address", JavaStatusHandler)
+	app.Get("/status/java/:address/:version?", JavaStatusHandler)
 	app.Get("/status/bedrock/:address", BedrockStatusHandler)
 	app.Get("/icon", DefaultIconHandler)
 	app.Get("/icon/:address", IconHandler)
@@ -58,6 +58,11 @@ func JavaStatusHandler(ctx *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	if opts == nil {
+		opts = &StatusOptions{}
+	}
+	srvVersion := ctx.Params("version")
+	opts.SrvVersion = srvVersion
 
 	host, port, err := ParseAddress(ctx.Params("address"), 25565)
 

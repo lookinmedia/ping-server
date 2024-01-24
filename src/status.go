@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"main/src/assets"
 	"net"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-version"
 	"github.com/mcstatus-io/mcutil/v3"
 	"github.com/mcstatus-io/mcutil/v3/formatting"
 	"github.com/mcstatus-io/mcutil/v3/options"
@@ -272,7 +274,7 @@ func FetchJavaStatus(host string, port uint16, opts *StatusOptions) JavaStatusRe
 	var (
 		err                error
 		srvRecord          *net.SRV
-		resolvedHost       string = host
+		resolvedHost       = host
 		ipAddress          *string
 		statusResult       *response.JavaStatus
 		legacyStatusResult *response.JavaStatusLegacy
@@ -282,7 +284,7 @@ func FetchJavaStatus(host string, port uint16, opts *StatusOptions) JavaStatusRe
 
 	// Setup initial wait group deltas
 	{
-		wg.Add(2)
+		wg.Add(1)
 
 		if opts.Query {
 			wg.Add(1)
@@ -317,45 +319,56 @@ func FetchJavaStatus(host string, port uint16, opts *StatusOptions) JavaStatusRe
 
 	// Retrieve the post-netty rewrite Java Edition status (Minecraft 1.8+)
 	{
-		go func() {
-			statusResult, _ = mcutil.Status(statusContext, host, port, options.JavaStatus{
-				EnableSRV:       true,
-				Timeout:         opts.Timeout - time.Millisecond*100,
-				ProtocolVersion: 47,
-				Ping:            false,
-			})
+		constraints, _ := version.NewConstraint(">= 1.8")
+		currVersion, _ := version.NewVersion(opts.SrvVersion)
 
-			wg.Done()
+		if opts.SrvVersion == "" {
+			currVersion, err = CreateWatcher().VersionByServer(host)
+			if err != nil {
+				log.Printf("version by host %s failed %s", host, err)
+				return JavaStatusResponse{}
+			}
+		}
 
-			legacyCancel()
+		if constraints.Check(currVersion) {
+			go func() {
+				statusResult, _ = mcutil.Status(statusContext, host, port, options.JavaStatus{
+					EnableSRV:       true,
+					Timeout:         opts.Timeout - time.Millisecond*100,
+					ProtocolVersion: 47,
+					Ping:            false,
+				})
 
-			if opts.Query && queryResult == nil {
+				wg.Done()
+
+				legacyCancel()
+
+				if opts.Query && queryResult == nil {
+					time.Sleep(time.Millisecond * 250)
+
+					if queryResult == nil {
+						queryCancel()
+					}
+				}
+			}()
+		} else {
+			// Retrieve the pre-netty rewrite Java Edition status (Minecraft 1.7 and below)
+			go func() {
+				legacyStatusResult, _ = mcutil.StatusLegacy(legacyContext, host, port, options.JavaStatusLegacy{
+					EnableSRV:       true,
+					Timeout:         opts.Timeout - time.Millisecond*100,
+					ProtocolVersion: 47,
+				})
+
+				wg.Done()
+
 				time.Sleep(time.Millisecond * 250)
 
 				if queryResult == nil {
 					queryCancel()
 				}
-			}
-		}()
-	}
-
-	// Retrieve the pre-netty rewrite Java Edition status (Minecraft 1.7 and below)
-	{
-		go func() {
-			legacyStatusResult, _ = mcutil.StatusLegacy(legacyContext, host, port, options.JavaStatusLegacy{
-				EnableSRV:       true,
-				Timeout:         opts.Timeout - time.Millisecond*100,
-				ProtocolVersion: 47,
-			})
-
-			wg.Done()
-
-			time.Sleep(time.Millisecond * 250)
-
-			if queryResult == nil {
-				queryCancel()
-			}
-		}()
+			}()
+		}
 	}
 
 	// Retrieve the query information (if it is available)

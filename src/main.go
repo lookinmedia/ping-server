@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/gofiber/fiber/v2"
 	"log"
 	"net/http"
 	"os"
-
-	"github.com/gofiber/fiber/v2"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 var (
@@ -73,7 +76,17 @@ func init() {
 func main() {
 	defer r.Close()
 
-	if err := app.Listen(fmt.Sprintf("%s:%d", config.Host, config.Port+instanceID)); err != nil {
-		panic(err)
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	CreateWatcher().Start(ctx, 10*time.Minute)
+
+	go func() {
+		if err := app.Listen(fmt.Sprintf("%s:%d", config.Host, config.Port+instanceID)); err != nil {
+			panic(err)
+		}
+	}()
+
+	exit := make(chan os.Signal, 1)
+	signal.Notify(exit, syscall.SIGINT, syscall.SIGTERM)
+	<-exit
+	cancel()
 }
