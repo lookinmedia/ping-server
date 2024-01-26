@@ -259,7 +259,7 @@ func GetStatusOptions(ctx *fiber.Ctx) (*StatusOptions, error) {
 
 	// Timeout
 	{
-		result.Timeout = time.Duration(math.Max(float64(time.Second)*ctx.QueryFloat("timeout", 5.0), float64(2*time.Second)))
+		result.Timeout = time.Duration(math.Max(float64(time.Second)*ctx.QueryFloat("timeout", 5.0), float64(time.Millisecond*250)))
 	}
 
 	return result, nil
